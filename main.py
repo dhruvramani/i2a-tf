@@ -35,7 +35,7 @@ def discount_with_dones(rewards, dones, GAMMA):
     discounted = []
     r = 0
     for reward, done in zip(rewards[::-1], dones[::-1]):
-        r = reward + GAMMA*r*(1.-done)
+        r = reward + GAMMA * r * (1.-done)
         discounted.append(r)
     return discounted[::-1]
 
@@ -57,91 +57,94 @@ def train(policy, save_name, load_count = 0, summarize=True, load_path=None, log
 
     obs = envs.reset()
 
-    with tf.Session() as sess:
-        actor_critic = get_actor_critic(sess, N_ENVS, N_STEPS, ob_space,
-                ac_space, policy, summarize)
-        if load_path is not None:
-            actor_critic.load(load_path)
-            print('Loaded a2c')
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    sess = tf.Session(config=config)
 
-        summary_op = tf.summary.merge_all()
-        writer = tf.summary.FileWriter(log_path, graph=sess.graph)
+    actor_critic = get_actor_critic(sess, N_ENVS, N_STEPS, ob_space,
+            ac_space, policy, summarize)
+    if load_path is not None:
+        actor_critic.load(load_path)
+        print('Loaded a2c')
 
-        sess.run(tf.global_variables_initializer())
+    summary_op = tf.summary.merge_all()
+    writer = tf.summary.FileWriter(log_path, graph=sess.graph)
 
-        batch_ob_shape = (N_ENVS*N_STEPS, nw, nh, nc)
+    sess.run(tf.global_variables_initializer())
 
-        dones = [False for _ in range(N_ENVS)]
-        nbatch = N_ENVS * N_STEPS
+    batch_ob_shape = (N_ENVS*N_STEPS, nw, nh, nc)
 
-        episode_rewards = np.zeros((N_ENVS, ))
-        final_rewards   = np.zeros((N_ENVS, ))
+    dones = [False for _ in range(N_ENVS)]
+    nbatch = N_ENVS * N_STEPS
 
-        for update in tqdm(range(load_count + 1, TOTAL_TIMESTEPS + 1)):
-            # mb stands for mini batch
-            mb_obs, mb_rewards, mb_actions, mb_values, mb_dones = [],[],[],[],[]
-            for n in range(N_STEPS):
-                actions, values, _ = actor_critic.act(obs)
+    episode_rewards = np.zeros((N_ENVS, ))
+    final_rewards   = np.zeros((N_ENVS, ))
 
-                mb_obs.append(np.copy(obs))
-                mb_actions.append(actions)
-                mb_values.append(values)
-                mb_dones.append(dones)
+    for update in tqdm(range(load_count + 1, TOTAL_TIMESTEPS + 1)):
+        # mb stands for mini batch
+        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones = [],[],[],[],[]
+        for n in range(N_STEPS):
+            actions, values, _ = actor_critic.act(obs)
 
-                obs, rewards, dones, _ = envs.step(actions)
-
-                episode_rewards += rewards
-                masks = 1 - np.array(dones)
-                final_rewards *= masks
-                final_rewards += (1 - masks) * episode_rewards
-                episode_rewards *= masks
-
-                mb_rewards.append(rewards)
-
+            mb_obs.append(np.copy(obs))
+            mb_actions.append(actions)
+            mb_values.append(values)
             mb_dones.append(dones)
 
-            #batch of steps to batch of rollouts
-            mb_obs = np.asarray(mb_obs, dtype=np.float32).swapaxes(1, 0).reshape(batch_ob_shape)
-            mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
-            mb_actions = np.asarray(mb_actions, dtype=np.int32).swapaxes(1, 0)
-            mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
-            mb_dones = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
-            mb_masks = mb_dones[:, :-1]
-            mb_dones = mb_dones[:, 1:]
+            obs, rewards, dones, _ = envs.step(actions)
 
-            last_values = actor_critic.critique(obs).tolist()
+            episode_rewards += rewards
+            masks = 1 - np.array(dones)
+            final_rewards *= masks
+            final_rewards += (1 - masks) * episode_rewards
+            episode_rewards *= masks
 
-            #discount/bootstrap off value fn
-            for n, (rewards, d, value) in enumerate(zip(mb_rewards, mb_dones, last_values)):
-                rewards = rewards.tolist()
-                d = d.tolist()
-                if d[-1] == 0:
-                    rewards = discount_with_dones(rewards+[value], d+[0], GAMMA)[:-1]
-                else:
-                    rewards = discount_with_dones(rewards, d, GAMMA)
-                mb_rewards[n] = rewards
+            mb_rewards.append(rewards)
 
-            mb_rewards = mb_rewards.flatten()
-            mb_actions = mb_actions.flatten()
-            mb_values = mb_values.flatten()
-            mb_masks = mb_masks.flatten()
+        mb_dones.append(dones)
 
-            if summarize:
-                loss, policy_loss, value_loss, policy_entropy, _, summary = actor_critic.train(mb_obs,
-                        mb_rewards, mb_masks, mb_actions, mb_values, update,
-                        summary_op)
-                writer.add_summary(summary, update)
+        #batch of steps to batch of rollouts
+        mb_obs = np.asarray(mb_obs, dtype=np.float32).swapaxes(1, 0).reshape(batch_ob_shape)
+        mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
+        mb_actions = np.asarray(mb_actions, dtype=np.int32).swapaxes(1, 0)
+        mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
+        mb_dones = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
+        mb_masks = mb_dones[:, :-1]
+        mb_dones = mb_dones[:, 1:]
+
+        last_values = actor_critic.critique(obs).tolist()
+
+        #discount/bootstrap off value fn
+        for n, (rewards, d, value) in enumerate(zip(mb_rewards, mb_dones, last_values)):
+            rewards = rewards.tolist()
+            d = d.tolist()
+            if d[-1] == 0:
+                rewards = discount_with_dones(rewards+[value], d+[0], GAMMA)[:-1]
             else:
-                loss, policy_loss, value_loss, policy_entropy, _ = actor_critic.train(mb_obs,
-                        mb_rewards, mb_masks, mb_actions, mb_values, update)
+                rewards = discount_with_dones(rewards, d, GAMMA)
+            mb_rewards[n] = rewards
 
-            if update % LOG_INTERVAL == 0 or update == 1:
-                print('%i): %.4f, %.4f, %.4f' % (update, policy_loss, value_loss, policy_entropy))
-                print(final_rewards.mean())
+        mb_rewards = mb_rewards.flatten()
+        mb_actions = mb_actions.flatten()
+        mb_values = mb_values.flatten()
+        mb_masks = mb_masks.flatten()
 
-            if update % SAVE_INTERVAL == 0:
-                print('Saving model')
-                actor_critic.save(SAVE_PATH, save_name + '_' + str(update) + '.ckpt')
+        if summarize:
+            loss, policy_loss, value_loss, policy_entropy, _, summary = actor_critic.train(mb_obs,
+                    mb_rewards, mb_masks, mb_actions, mb_values, update,
+                    summary_op)
+            writer.add_summary(summary, update)
+        else:
+            loss, policy_loss, value_loss, policy_entropy, _ = actor_critic.train(mb_obs,
+                    mb_rewards, mb_masks, mb_actions, mb_values, update)
+
+        if update % LOG_INTERVAL == 0 or update == 1:
+            print('%i): %.4f, %.4f, %.4f' % (update, policy_loss, value_loss, policy_entropy))
+            print(final_rewards.mean())
+
+        if update % SAVE_INTERVAL == 0:
+            print('Saving model')
+            actor_critic.save(SAVE_PATH, save_name + '_' + str(update) + '.ckpt')
 
         actor_critic.save(SAVE_PATH, save_name + '_done.ckpt')
 

@@ -218,7 +218,7 @@ class I2aPolicy(object):
             self.features = features
 
             hidden_state = tf.reshape(hidden_state, [state_batch_size, 80 * 256
-                // 16])
+                // 16]) # NOTE : full trajectory, look at shape
 
             # Combine both paths
             x = tf.concat([features, hidden_state], axis=1)
