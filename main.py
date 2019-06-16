@@ -91,7 +91,7 @@ def train(policy, save_name, load_count = 0, summarize=True, load_path=None, log
             mb_values.append(values)
             mb_dones.append(dones)
 
-            env.render()
+            envs.render()
             obs, rewards, dones, _ = envs.step(actions)
 
             episode_rewards += rewards
