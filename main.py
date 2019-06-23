@@ -141,7 +141,6 @@ def train(policy, save_name, load_count = 0, summarize=True, load_path=None, log
         if update % LOG_INTERVAL == 0 or update == 1:
             print('%i => Policy Loss : %.4f, Value Loss : %.4f, Policy Entropy : %.4f, Final Reward : %.4f' % (update, policy_loss, value_loss, policy_entropy, final_rewards.mean()))
 
-
         if update % SAVE_INTERVAL == 0:
             print('Saving model')
             actor_critic.save(SAVE_PATH, save_name + '_' + str(update) + '.ckpt')
